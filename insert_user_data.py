@@ -75,8 +75,15 @@ def main():
     
     # Connect to MongoDB
     try:
-        uri = os.getenv('MONGODB_URI', 'mongodb+srv://admin:password!@cluster0.avge5.mongodb.net')
-        client = MongoClient(uri)
+        uri = os.getenv('MONGODB_URI')
+        username = os.getenv('MONGODB_USERNAME')
+        password = os.getenv('MONGODB_PASSWORD')
+        
+        if not all([uri, username, password]):
+            raise ValueError("Missing required MongoDB environment variables")
+            
+        connection_string = f"mongodb+srv://{username}:{password}@{uri}"
+        client = MongoClient(connection_string)
         client.admin.command('ping')
         print("Successfully connected to MongoDB!")
     except Exception as e:
