@@ -1,4 +1,5 @@
 //Percentile Query to show whether Christmas power usage is unusual compared to normal days
+
 db.power_readings.aggregate([
   // Match December data
   {
@@ -46,3 +47,35 @@ db.power_readings.aggregate([
     }
   }
 ])
+
+///SHOWCASE PQS
+///Run run_queries.py to see what kinds of queries are running slow
+// Go to query insights and extract query hash for each slow query and run two commands below
+
+
+// Block Slow Query 1 using query hash (Complex percentile calculation with lookups) by setting reject to true
+db.adminCommand({
+  setQuerySettings: "065071A28A2850FBF29BB1DC136A329881A8D530B640BDCD663A5369E6561EC1",
+  settings: {
+    reject: true,
+    comment: "Blocked query with excessive resource consumption"
+  }
+})
+
+// Block Slow Query 2 (Inefficient regex filter with complex calculations) by setting reject to true
+db.adminCommand({
+  setQuerySettings: "E74112C6EBA277E1B7E4E1814A84EB306B9C98E7EB7F47D03925220EAF2A6CE2",
+  settings: {
+    reject: true,
+    comment: "Blocked resource-intensive query with excessive processing requirements"
+  }
+})
+
+//Confirm if PQS has been applied
+db.aggregate( [
+   { $querySettings: {} }
+] )
+
+
+
+
