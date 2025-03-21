@@ -1,2 +1,5 @@
-dnspython==2.7.0
-pymongo==4.11.2
+Flask==2.3.3
+pymongo==4.5.0
+python-dotenv==1.0.0
+pytz==2023.3
+flask-cors==4.0.0

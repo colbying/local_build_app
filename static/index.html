@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Colby's Electricity Usage</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 30px;
+      background: #f7f7f7;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    #chart-container {
+      width: 90%;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Colby's Electricity Usage over the last 3 days</h1>
+  <div id="chart-container">
+    <canvas id="usageChart"></canvas>
+  </div>
+
+  <script>
+    async function fetchUsageData() {
+      const response = await fetch('/api/usage');
+      const data = await response.json();
+      return data;
+    }
+
+    async function renderChart() {
+      const usageData = await fetchUsageData();
+
+      const labels = usageData.map(point => point.label);
+      const usageValues = usageData.map(point => point.usage);
+
+      const ctx = document.getElementById('usageChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Sum of Current Usage (per minute)',
+            data: usageValues,
+            borderColor: 'rgba(75, 192, 192, 1)',
+            fill: false,
+            tension: 0.1
+          }]
+        },
+        options: {
+          scales: {
+            x: {
+              title: {
+                display: true,
+                text: 'Time (EST, 12-hour format)'
+              }
+            },
+            y: {
+              title: {
+                display: true,
+                text: 'Electricity Usage'
+              }
+            }
+          },
+          plugins: {
+            legend: {
+              display: true
+            }
+          }
+        }
+      });
+    }
+
+    // Render the chart when the page loads
+    window.onload = renderChart;
+  </script>
+</body>
+</html>
