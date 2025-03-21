@@ -11,16 +11,19 @@ from pymongo import MongoClient
 # CONFIGURATION - MODIFY THESE VALUES
 #############################################
 
-# MongoDB connection
+# MongoDB connection -- replace with your mongodb url
 MONGODB_URL = "mongodb+srv://natreya:Levante123@democluster.ytvgm.mongodb.net/?retryWrites=true&w=majority&appName=DemoCluster"
+
+
+####
 DATABASE_NAME = "smart_home_data"
 COLLECTION_NAME = "power_readings"
 
-# Date range
+# Date range (Change the date range to insert more or less data according to your preference)
 START_DATE = datetime.datetime(2024, 1, 1)  # Year, Month, Day
 END_DATE = datetime.datetime(2024, 12, 31, 23, 59, 59)  # Year, Month, Day, Hour, Minute, Second
 
-# Data generation frequency
+# Data generation frequency (Can change the generation frequency to control the amount of data generated)
 INTERVAL_SECONDS = 20  # Seconds between readings
 
 # Batch size for MongoDB inserts
