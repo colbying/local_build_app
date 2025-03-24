@@ -1,9 +1,10 @@
 import os
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, render_template
 from pymongo import MongoClient, errors
 from datetime import datetime, timedelta
 from collections import defaultdict
 from flask_cors import CORS
+from qe_utils import get_encryption_client, close_encryption_resources, QE_NAMESPACE
 
 app = Flask(__name__)
 # Allow all origins with more permissive CORS settings
@@ -51,55 +52,116 @@ def serve_static(path):
 @app.route('/api/usage')
 def get_usage():
     """
-    Returns the last 3 days of electricity usage.
-    Groups data by minute (EST), sums current_usage for each minute.
+    Returns the last 3.5 days of electricity usage.
+    Groups data by 5-minute intervals (EST), sums current_usage for each interval.
     """
     try:
-        # Calculate the cutoff (last 3 days)
+        # Calculate the cutoff (last 3.5 days instead of 3)
         now_utc = datetime.utcnow()
-        cutoff_utc = now_utc - timedelta(days=3)
+        cutoff_utc = now_utc - timedelta(days=3.5)
 
-        # Query for documents in the last 3 days
+        # Query for documents in the last 3.5 days
         docs = collection.find({"Timestamp": {"$gte": cutoff_utc}})
 
-        # We will group by "year-month-day-hour-minute" in UTC, 
+        # We will group by 5-minute intervals in UTC, 
         # then convert to EST when returning. 
-        usage_by_minute = defaultdict(float)
+        usage_by_interval = defaultdict(float)
+        count_by_interval = defaultdict(int)
 
         for doc in docs:
             ts_utc = doc.get("Timestamp")
             current_usage = doc.get("current_usage", 0.0)
 
             if ts_utc:
-                # Truncate to the minute in UTC
-                truncated_utc = ts_utc.replace(second=0, microsecond=0)
-                usage_by_minute[truncated_utc] += float(current_usage)
+                # Truncate to 5-minute intervals
+                # First truncate to the minute
+                truncated_minute = ts_utc.replace(second=0, microsecond=0)
+                # Then calculate which 5-minute interval this belongs to
+                minute_part = truncated_minute.minute
+                interval_minute = (minute_part // 5) * 5
+                interval_time = truncated_minute.replace(minute=interval_minute)
+                
+                # Accumulate usage and count for averaging
+                usage_by_interval[interval_time] += float(current_usage)
+                count_by_interval[interval_time] += 1
 
-        # Sort the minutes in ascending order
-        sorted_minutes = sorted(usage_by_minute.keys())
+        # Calculate average usage for each 5-minute interval
+        avg_usage_by_interval = {}
+        for interval_time, total_usage in usage_by_interval.items():
+            count = count_by_interval[interval_time]
+            if count > 0:
+                avg_usage_by_interval[interval_time] = total_usage / count
+            else:
+                avg_usage_by_interval[interval_time] = total_usage
+
+        # Sort the intervals in ascending order
+        sorted_intervals = sorted(avg_usage_by_interval.keys())
 
         # Prepare data for JSON response
-        # Convert each minute to local EST time in 12-hour format with AM/PM
+        # Convert each interval to local EST time
         import pytz
         est = pytz.timezone("US/Eastern")
 
         data_points = []
-        for minute_utc in sorted_minutes:
-            minute_est = minute_utc.astimezone(est)
-            # Format: "03/19 08:15 PM"
-            minute_label = minute_est.strftime("%m/%d %I:%M %p")
-            # Alternatively, you can also separate date vs time for clarity
+        for interval_utc in sorted_intervals:
+            interval_est = interval_utc.astimezone(est)
+            # Format: "MM/DD hh:mm AM/PM" - Keep the date part for day separators
+            interval_label = interval_est.strftime("%m/%d %I:%M %p")
 
             data_points.append({
-                "label": minute_label,
-                "usage": usage_by_minute[minute_utc]
+                "label": interval_label,
+                "usage": avg_usage_by_interval[interval_utc],
+                # Add full date info for the frontend to use
+                "fullDate": interval_est.strftime("%Y-%m-%d")
             })
 
-        print(f"Returning {len(data_points)} data points")
+        print(f"Returning {len(data_points)} data points (5-minute intervals)")
         return jsonify(data_points)
     except Exception as e:
         print(f"Error in get_usage: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/qe_demo')
+def get_senior_citizens_west_coast():
+    """Returns senior citizens in West Coast region using queryable encryption."""
+    try:
+        # Get encrypted client
+        encrypted_client, client_encryption = get_encryption_client()
+        
+        # Query encrypted data
+        db_name, coll_name = QE_NAMESPACE.split(".")
+        results = list(encrypted_client[db_name][coll_name].find({
+            "age": {"$gte": 65},
+            "location.region": "West Coast"
+        }))
+        
+        # Prepare results for JSON response
+        for doc in results:
+            doc["_id"] = str(doc["_id"])
+            if "created_at" in doc:
+                doc["created_at"] = doc["created_at"].isoformat()
+        
+        # Close resources
+        close_encryption_resources(encrypted_client, client_encryption)
+        
+        return jsonify({
+            "count": len(results),
+            "message": "Senior citizens (age ≥ 65) in the West Coast region",
+            "results": results
+        })
+    except Exception as e:
+        print(f"QE demo error: {e}")
+        return jsonify({
+            "error": str(e),
+            "message": "Failed to query encrypted data. Check AWS credentials and data setup."
+        }), 500
+
+@app.route('/qe_demo')
+def qe_demo_page():
+    """
+    Render the Queryable Encryption demo page
+    """
+    return render_template('qe_demo.html')
 
 if __name__ == '__main__':
     # Run the Flask app

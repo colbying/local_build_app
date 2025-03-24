@@ -6,7 +6,7 @@ from pymongo import MongoClient, errors
 
 # --- Configuration / Parameters ---
 # Modify N_DAYS here to change how many days of data you want
-N_DAYS = 1  # By default generate data for the last 1 day (24 hours)
+N_DAYS = 4  # Generate 4 days of data to cover the 3.5 day display window
 
 MONGODB_URI = os.environ.get("MONGODB_URI")          # e.g. "cluster0.mongodb.net"
 MONGODB_USERNAME = os.environ.get("MONGODB_USERNAME") # e.g. "myUser"
@@ -19,6 +19,13 @@ client = MongoClient(connection_string)
 # Define database/collection - Changed from home_energy to smart_home
 db = client["smart_home"]
 collection_name = "sensor_readings"
+
+# --- First drop the existing collection if it exists ---
+try:
+    db.drop_collection(collection_name)
+    print(f"Dropped existing collection '{collection_name}' from smart_home database")
+except Exception as e:
+    print(f"Note: Could not drop collection: {e}")
 
 # --- Create a time series collection (if it doesn't exist) ---
 try:
@@ -80,33 +87,103 @@ def get_current_usage(category, t):
     """
     hour = t.hour
     minute = t.minute
+    
+    # Add day-based variability (some days have higher/lower baseline usage)
+    day_of_week = t.weekday()  # 0 = Monday, 6 = Sunday
+    day_factor = 0.8 + (day_of_week * 0.05)  # Weekends have higher baseline
+    
+    # Add random fluctuations throughout the day
+    time_noise = random.uniform(0.7, 1.3)
+    
+    # Add some occasional random spikes (simulating random appliance usage)
+    random_spike = 0
+    if random.random() < 0.03:  # 3% chance of a random spike
+        random_spike = random.uniform(0.5, 2.0)
 
     if category == "HEATER":
-        # Big spike around 7:00 AM for ~30 minutes
-        if hour == 7 and minute < 30:
-            return round(random.uniform(4.5, 5.0), 2)  # Large usage
+        # Big spike from 7:00 AM to 9:00 AM (2 hours)
+        # Add more variability to the spike timing and intensity
+        if 7 <= hour < 9:
+            base_usage = random.uniform(4.2, 5.2)
+            # Higher in the middle of the spike period, lower at the beginning/end
+            spike_curve = 1.0
+            if hour == 7 and minute < 20:
+                # Ramp up at the beginning
+                spike_curve = 0.7 + (minute / 30)
+            elif hour == 8 and minute > 40:
+                # Ramp down toward the end
+                spike_curve = 1.0 - ((minute - 40) / 60)
+                
+            # Add the random variability
+            return round((base_usage * spike_curve * time_noise * day_factor) + random_spike, 2)
         else:
-            # Some small standby usage
-            return round(random.uniform(0.1, 0.15), 2)
+            # Standby usage with more variability
+            standby = random.uniform(0.08, 0.18) * day_factor * time_noise
+            return round(standby + random_spike, 2)
 
     elif category == "OVEN":
         # Spike late afternoon / early evening (16:00 - 18:00)
         if 16 <= hour < 18:
-            return round(random.uniform(2.0, 3.0), 2)
+            # Add variations in cooking time and intensity
+            base_usage = random.uniform(1.8, 3.2) 
+            
+            # If it's a weekend, oven usage might be higher
+            if day_of_week >= 5:  # Weekend
+                base_usage *= 1.2
+                
+            # Cooking intensity varies during cooking cycle
+            cooking_phase = (((hour - 16) * 60) + minute) / 120  # 0 to 1 over the 2 hour period
+            phase_factor = 1.0
+            
+            # Preheating spike at the beginning
+            if cooking_phase < 0.1:  
+                phase_factor = 1.3
+            # Cooling down at the end
+            elif cooking_phase > 0.8:
+                phase_factor = 0.7 + ((1 - cooking_phase) * 0.3)
+                
+            return round((base_usage * phase_factor * time_noise * day_factor) + random_spike, 2)
         else:
-            # Low usage or off
-            return round(random.uniform(0.05, 0.1), 2)
+            # Low usage or off with more variability
+            return round((random.uniform(0.03, 0.12) * day_factor * time_noise) + random_spike, 2)
 
     elif category == "TV":
         # Typical evening usage (18:00 - 22:00)
         if 18 <= hour < 22:
-            return round(random.uniform(0.8, 1.5), 2)
+            # TV usage varies by show/program and day of week
+            base_usage = random.uniform(0.6, 1.7)
+            
+            # Higher usage during prime time (8PM-9PM)
+            if hour == 20:
+                base_usage *= 1.2
+                
+            # Weekend TV watching tends to be higher
+            if day_of_week >= 5:  # Weekend
+                base_usage *= 1.15
+                
+            # Some people turn off TV during commercials
+            if random.random() < 0.1:  # 10% chance of commercial breaks
+                base_usage *= 0.7
+                
+            return round((base_usage * time_noise * day_factor) + random_spike, 2)
         else:
-            return round(random.uniform(0.05, 0.1), 2)
+            # Standby power with occasional spikes (like automatic updates)
+            standby = random.uniform(0.04, 0.12) * day_factor * time_noise
+            return round(standby + random_spike, 2)
 
     elif category == "MISC_APPLIANCE":
-        # Random small usage
-        return round(random.uniform(0.05, 0.2), 2)
+        # Random small usage with occasional spikes (blenders, chargers, etc)
+        base_usage = random.uniform(0.03, 0.25)
+        
+        # Morning and evening tend to have more misc appliance usage
+        if (7 <= hour < 9) or (17 <= hour < 21):
+            base_usage *= 1.3
+            
+        # Some days have more small appliance usage
+        if day_of_week in [0, 3, 6]:  # Monday, Thursday, Sunday
+            base_usage *= 1.2
+            
+        return round((base_usage * time_noise * day_factor) + random_spike, 2)
 
     return 0.0
 
@@ -116,16 +193,40 @@ all_readings = []
 # Generate data for each day in [start_date, end_date)
 current_day = start_date
 while current_day < end_date:
+    # Weather effect for the current day (affects heater usage)
+    is_cold_day = random.random() < 0.4  # 40% chance of a cold day
+    cold_factor = 1.3 if is_cold_day else 1.0
+    
+    # Some days devices might be off completely (e.g., nobody home)
+    away_from_home = random.random() < 0.1  # 10% chance nobody's home
+    
+    # Generate data for each minute of the current day
     for minute_offset in range(24 * 60):  # for each minute of the day
         current_time = current_day + timedelta(minutes=minute_offset)
 
         # If we've reached or passed the end date, break
         if current_time >= end_date:
             break
-
+        
+        # Maybe skip some readings to simulate connectivity issues (creates gaps in the data)
+        if random.random() < 0.005:  # 0.5% chance of missing a reading
+            continue
+            
+        # Generate readings for each device
         for dev in devices:
-            usage = get_current_usage(dev["category"], current_time)
-
+            # If nobody's home, only report standby power for most devices 
+            # (except MISC_APPLIANCE which might include automated systems)
+            if away_from_home and dev["category"] != "MISC_APPLIANCE":
+                usage = random.uniform(0.02, 0.1)  # minimal standby power
+            else:
+                # Get baseline usage for this device at this time
+                usage = get_current_usage(dev["category"], current_time)
+                
+                # Apply cold weather factor to heater
+                if dev["category"] == "HEATER" and is_cold_day:
+                    usage *= cold_factor
+            
+            # Create the reading document
             reading = {
                 # The timeField for the time series collection must be a datetime
                 "Timestamp": current_time,

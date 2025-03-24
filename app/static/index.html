@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Colby's Electricity Usage</title>
+  <title>Electricity Usage</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.1.0/dist/chartjs-plugin-annotation.min.js"></script>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -19,62 +20,188 @@
       max-width: 1000px;
       margin: 0 auto;
     }
+    .loading {
+      text-align: center;
+      padding: 20px;
+    }
+    .error-message {
+      color: #d9534f;
+      text-align: center;
+      padding: 20px;
+      background: #f8d7da;
+      border-radius: 5px;
+      margin: 20px 0;
+    }
   </style>
 </head>
 <body>
-  <h1>Colby's Electricity Usage over the last 3 days</h1>
+  <div style="text-align: center; margin-bottom: 20px;">
+    <a href="/qe_demo" style="display: inline-block; background: #4CAF50; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold;">
+      Try MongoDB Queryable Encryption Demo →
+    </a>
+  </div>
+  <h1>Total Electricity Usage over the last 3 days</h1>
   <div id="chart-container">
-    <canvas id="usageChart"></canvas>
+    <div class="loading">Loading data...</div>
   </div>
 
   <script>
     async function fetchUsageData() {
-      const response = await fetch('http://localhost:5000/api/usage');
-      const data = await response.json();
-      return data;
+      try {
+        const apiUrl = window.location.origin + '/api/usage';
+        console.log('Fetching data from:', apiUrl);
+        
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.error) {
+          throw new Error(`API error: ${data.error}`);
+        }
+        
+        console.log(`Received ${data.length} data points`);
+        return data;
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        throw error;
+      }
     }
 
     async function renderChart() {
-      const usageData = await fetchUsageData();
+      const chartContainer = document.getElementById('chart-container');
+      
+      try {
+        const usageData = await fetchUsageData();
+        
+        if (!usageData || usageData.length === 0) {
+          chartContainer.innerHTML = '<div class="error-message">No data available for the selected time period.</div>';
+          return;
+        }
 
-      const labels = usageData.map(point => point.label);
-      const usageValues = usageData.map(point => point.usage);
+        // Clear loading message
+        chartContainer.innerHTML = '<canvas id="usageChart"></canvas>';
+        
+        const labels = usageData.map(point => point.label);
+        const usageValues = usageData.map(point => point.usage);
 
-      const ctx = document.getElementById('usageChart').getContext('2d');
-      new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: labels,
-          datasets: [{
-            label: 'Sum of Current Usage (per minute)',
-            data: usageValues,
-            borderColor: 'rgba(75, 192, 192, 1)',
-            fill: false,
-            tension: 0.1
-          }]
-        },
-        options: {
-          scales: {
-            x: {
-              title: {
-                display: true,
-                text: 'Time (EST, 12-hour format)'
-              }
-            },
-            y: {
-              title: {
-                display: true,
-                text: 'Electricity Usage'
-              }
-            }
-          },
-          plugins: {
-            legend: {
-              display: true
+        // Extract dates to create day separators
+        const uniqueDates = [];
+        const dateIndicesToMark = [];
+        
+        // Use the fullDate field for accurate day separation
+        usageData.forEach((point, index) => {
+          const fullDate = point.fullDate; // Use the new fullDate field
+          if (!uniqueDates.includes(fullDate)) {
+            uniqueDates.push(fullDate);
+            if (index > 0) { // Don't mark the first data point
+              // Get readable date format for display
+              const displayDate = new Date(fullDate).toLocaleDateString('en-US', {
+                weekday: 'short', 
+                month: 'short', 
+                day: 'numeric'
+              });
+              
+              dateIndicesToMark.push({
+                index: index,
+                date: displayDate
+              });
             }
           }
-        }
-      });
+        });
+        
+        // Create annotation objects for each day separator
+        const annotations = {};
+        dateIndicesToMark.forEach((mark, i) => {
+          annotations[`line${i}`] = {
+            type: 'line',
+            xMin: mark.index,
+            xMax: mark.index,
+            borderColor: 'rgba(100, 100, 100, 0.75)',
+            borderWidth: 2,
+            borderDash: [6, 4],
+            label: {
+              display: true,
+              content: mark.date,
+              position: 'start',
+              backgroundColor: 'rgba(0, 0, 0, 0.65)',
+              color: 'white',
+              padding: {
+                top: 5,
+                bottom: 5,
+                left: 8,
+                right: 8
+              },
+              font: {
+                weight: 'bold',
+                size: 12
+              },
+              borderRadius: 4
+            }
+          };
+        });
+
+        const ctx = document.getElementById('usageChart').getContext('2d');
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Electricity Usage (kW)',
+              data: usageValues,
+              borderColor: 'rgba(75, 192, 192, 1)',
+              backgroundColor: 'rgba(75, 192, 192, 0.1)',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 1,
+              pointHoverRadius: 5
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: {
+                title: {
+                  display: true,
+                  text: 'Time (EST) - 5-Minute Intervals'
+                },
+                ticks: {
+                  maxRotation: 45,
+                  minRotation: 45,
+                  autoSkip: true,
+                  maxTicksLimit: 24
+                }
+              },
+              y: {
+                title: {
+                  display: true,
+                  text: 'Electricity Usage (kW)'
+                },
+                min: 0
+              }
+            },
+            plugins: {
+              legend: {
+                display: true
+              },
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    return `Usage: ${context.parsed.y.toFixed(2)} kW`;
+                  }
+                }
+              },
+              annotation: {
+                annotations: annotations
+              }
+            }
+          }
+        });
+      } catch (error) {
+        chartContainer.innerHTML = `<div class="error-message">Error loading data: ${error.message}</div>`;
+      }
     }
 
     // Render the chart when the page loads
