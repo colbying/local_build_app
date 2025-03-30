@@ -1,25 +1,41 @@
 import random
 import os
+import argparse
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 
-def generate_user_data(num_users=1000000):
+def generate_user_data(num_users=1000, global_region=None):
     """
     Generates sample user documents with an embedded 'devices' array.
     Each user will have 1-3 random devices.
     """
-    print(f"\nGenerating data for {num_users} users...")
+    print(f"\nGenerating data for {num_users} users in {global_region if global_region else 'default regions'}...")
     brands = ["Samsung", "LG", "Philips", "GE", "Nest", "Ecobee"]
     device_types = ["Smart Speaker", "Smart Display", "Smart Thermostat", "Smart Light", "Smart Camera", "Space Heater"]
     
-    # Define location data
+    # Define location data based on global region
     location_data = {
-        "New York": {"region": "Northeast", "zipcodes": ["10001", "10002", "10003", "10004", "10005"]},
-        "Chicago": {"region": "Midwest", "zipcodes": ["60601", "60602", "60603", "60604", "60605"]},
-        "Los Angeles": {"region": "West Coast", "zipcodes": ["90001", "90002", "90003", "90004", "90005"]},
-        "San Francisco": {"region": "West Coast", "zipcodes": ["94101", "94102", "94103", "94104", "94105"]},
-        "Miami": {"region": "Southeast", "zipcodes": ["33101", "33102", "33103", "33104", "33105"]}
+        "North America": {
+            "New York": {"region": "Northeast", "zipcodes": ["10001", "10002", "10003", "10004", "10005"]},
+            "Chicago": {"region": "Midwest", "zipcodes": ["60601", "60602", "60603", "60604", "60605"]},
+            "Los Angeles": {"region": "West Coast", "zipcodes": ["90001", "90002", "90003", "90004", "90005"]},
+            "San Francisco": {"region": "West Coast", "zipcodes": ["94101", "94102", "94103", "94104", "94105"]},
+            "Miami": {"region": "Southeast", "zipcodes": ["33101", "33102", "33103", "33104", "33105"]}
+        },
+        "Europe": {
+            "London": {"region": "UK", "zipcodes": ["E1", "EC1", "N1", "NW1", "SE1"]},
+            "Paris": {"region": "France", "zipcodes": ["75001", "75002", "75003", "75004", "75005"]},
+            "Berlin": {"region": "Germany", "zipcodes": ["10115", "10117", "10119", "10178", "10179"]},
+            "Madrid": {"region": "Spain", "zipcodes": ["28001", "28002", "28003", "28004", "28005"]},
+            "Rome": {"region": "Italy", "zipcodes": ["00100", "00121", "00122", "00123", "00124"]}
+        }
     }
+
+    # Select appropriate location data based on global_region
+    if global_region:
+        active_locations = location_data[global_region]
+    else:
+        active_locations = location_data["North America"]  # Default to North America
 
     # Function to generate a random birthday between 1960 and 2000
     def generate_birthday():
@@ -37,9 +53,9 @@ def generate_user_data(num_users=1000000):
         print(f"Creating User {user_id} with {num_devices} devices")
         
         # Pick a random city and its corresponding data
-        city = random.choice(list(location_data.keys()))
-        region = location_data[city]["region"]
-        zipcode = random.choice(location_data[city]["zipcodes"])
+        city = random.choice(list(active_locations.keys()))
+        region = active_locations[city]["region"]
+        zipcode = random.choice(active_locations[city]["zipcodes"])
         
         devices = []
         # Create random devices for this user
@@ -73,6 +89,7 @@ def generate_user_data(num_users=1000000):
                 "region": region,
                 "zipcode": zipcode
             },
+            "global_region": global_region if global_region else "North America",
             "birthday": generate_birthday(),
             "devices": devices
         }
@@ -87,7 +104,17 @@ def calculate_age(birthday):
     return age
 
 def main():
+    # Set up command line arguments
+    parser = argparse.ArgumentParser(description='Generate and insert user data into MongoDB')
+    parser.add_argument('--global-region', choices=['North America', 'Europe'], 
+                      help='Specify the global region for the users (North America or Europe)')
+    parser.add_argument('--num-users', type=int, default=1000,
+                      help='Number of users to generate (default: )')
+    
+    args = parser.parse_args()
+    
     print("Starting the MongoDB query script...")
+    print(f"Global Region: {args.global_region if args.global_region else 'North America (default)'}")
     
     # Connect to MongoDB
     try:
@@ -109,8 +136,8 @@ def main():
     db = client["smart_home"]
     users_collection = db["users"]
 
-    # Generate and insert user data
-    users_data = generate_user_data()
+    # Generate and insert user data with specified global region
+    users_data = generate_user_data(args.num_users, args.global_region)
     
     # Clear existing data if needed
     users_collection.delete_many({})
@@ -119,53 +146,23 @@ def main():
     result = users_collection.insert_many(users_data)
     print(f"\nInserted {len(result.inserted_ids)} users")
 
-    # Example query: Find users with Smart Thermostats
-    print("\nExecuting sample query for users with Smart Thermostats...")
+    # Example queries
+    print("\nExecuting sample queries...")
     
-    query = {
-        "devices.deviceType": "Smart Thermostat"
-    }
-
-    results = users_collection.find(query)
-    
-    print("\nQuery Results:")
-    print("-" * 50)
-    
-    result_count = 0
-    for user_doc in results:
-        result_count += 1
-        print(
-            f"User {user_doc['name']} "
-            f"(Region: {user_doc['location']['region']}) "
-            f"Email: {user_doc['email']}"
-        )
-    
-    print("-" * 50)
-    print(f"Found {result_count} users with Smart Thermostats")
-
-    # Example query 2: Find users in the Northeast region
-    print("\nExecuting sample query for users in Northeast region...")
-    
-    query = {
-        "location.region": "Northeast"
-    }
-
-    results = users_collection.find(query)
-    
-    print("\nQuery Results:")
-    print("-" * 50)
-    
-    result_count = 0
-    for user_doc in results:
-        result_count += 1
-        print(
-            f"User {user_doc['name']} "
-            f"(City: {user_doc['location']['city']}) "
-            f"Email: {user_doc['email']}"
-        )
-    
-    print("-" * 50)
-    print(f"Found {result_count} users in the Northeast region")
+    # Query by global region
+    if args.global_region:
+        query = {"global_region": args.global_region}
+        results = users_collection.find(query).limit(5)
+        
+        print(f"\nSample users from {args.global_region}:")
+        print("-" * 50)
+        for user_doc in results:
+            print(
+                f"User {user_doc['name']} "
+                f"(City: {user_doc['location']['city']}, "
+                f"Region: {user_doc['location']['region']}) "
+                f"Email: {user_doc['email']}"
+            )
 
     # Clean up the connection
     print("\nClosing MongoDB connection...")

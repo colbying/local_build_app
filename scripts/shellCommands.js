@@ -8,3 +8,15 @@ db.users.find({"location.city": "San Francisco", "devices.brand": "Philips"}, {"
 db.users.find({"location.city": "New York", "devices.deviceType": "Space Heater"}, {"email":1})
 
 // Queryable encryption
+sh.enableSharding("smart_home")
+sh.shardCollection(
+    "smart_home.sensor_readings",
+    { "metadata": 1 },
+    { 
+      timeseries: { 
+        timeField: "Timestamp", 
+        metaField: "metadata", 
+        granularity: "minutes" 
+      } 
+    }
+  )
