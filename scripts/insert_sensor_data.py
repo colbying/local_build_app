@@ -33,7 +33,7 @@ try:
         collection_name,
         timeseries={
             "timeField": "Timestamp",  # field with datetime
-            "metaField": "UserId",     # field containing metadata
+            "metaField": "metadata",   # single field that will contain both userId and deviceId
             "granularity": "minutes"
         }
     )
@@ -55,24 +55,28 @@ start_date = end_date - timedelta(days=N_DAYS)
 # Example devices for each category
 devices = [
     {
+        "deviceId": "HEAT001",
         "category": "HEATER",
         "brand": "AcmeHeating",
         "model": "HeatMax1000",
         "name": "LivingRoomHeater"
     },
     {
+        "deviceId": "OVEN001",
         "category": "OVEN",
         "brand": "BakersDelight",
         "model": "OvenProX2",
         "name": "KitchenOven"
     },
     {
+        "deviceId": "TV001",
         "category": "TV",
         "brand": "ScreenMaster",
         "model": "TV-LCD55",
         "name": "LivingRoomTV"
     },
     {
+        "deviceId": "MISC001",
         "category": "MISC_APPLIANCE",
         "brand": "GenericBrand",
         "model": "MiscModel42",
@@ -231,8 +235,11 @@ while current_day < end_date:
                 # The timeField for the time series collection must be a datetime
                 "Timestamp": current_time,
                 
-                # The metaField for the time series collection
-                "UserId": USER_ID,
+                # Combine metadata fields into a single field
+                "metadata": {
+                    "UserId": USER_ID,
+                    "deviceId": dev["deviceId"]
+                },
 
                 # Device info
                 "Device": {

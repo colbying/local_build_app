@@ -51,37 +51,52 @@ def get_encryption_client():
         CodecOptions(uuid_representation=STANDARD),
     )
     
-    # Get or create data key
-    data_key = client[key_vault_db][key_vault_coll].find_one({"keyAltNames": "qe_demo_data_key"})
+    # Get or create data keys for each field
+    age_key = client[key_vault_db][key_vault_coll].find_one({"keyAltNames": "qe_demo_age_key"})
+    region_key = client[key_vault_db][key_vault_coll].find_one({"keyAltNames": "qe_demo_region_key"})
     
-    if not data_key:
-        # Create a new data key
-        data_key_id = client_encryption.create_data_key(
+    if not age_key:
+        # Create a new data key for age field
+        age_key_id = client_encryption.create_data_key(
             "aws",
             master_key={
                 "region": "us-east-1",
                 "key": AWS_KMS_KEY_ID,
                 "endpoint": "kms.us-east-1.amazonaws.com"
             },
-            key_alt_names=["qe_demo_data_key"]
+            key_alt_names=["qe_demo_age_key"]
         )
     else:
-        data_key_id = data_key["_id"]
+        age_key_id = age_key["_id"]
+
+    if not region_key:
+        # Create a new data key for region field
+        region_key_id = client_encryption.create_data_key(
+            "aws",
+            master_key={
+                "region": "us-east-1",
+                "key": AWS_KMS_KEY_ID,
+                "endpoint": "kms.us-east-1.amazonaws.com"
+            },
+            key_alt_names=["qe_demo_region_key"]
+        )
+    else:
+        region_key_id = region_key["_id"]
     
-    # Define encryption schema
+    # Define encryption schema with separate keys
     encrypted_fields_map = {
         QE_NAMESPACE: {
             "fields": [
                 {
                     "path": "age",
                     "bsonType": "int",
-                    "keyId": data_key_id,
-                    "queries": [{"queryType": "equality"}, {"queryType": "range"}]
+                    "keyId": age_key_id,
+                    "queries": [{"queryType": "range"}]
                 },
                 {
                     "path": "location.region",
                     "bsonType": "string",
-                    "keyId": data_key_id,
+                    "keyId": region_key_id,
                     "queries": [{"queryType": "equality"}]
                 }
             ]
