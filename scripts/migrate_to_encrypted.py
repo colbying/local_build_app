@@ -8,46 +8,56 @@ from bson.binary import STANDARD
 from bson.codec_options import CodecOptions
 
 # MongoDB and AWS settings
-MONGODB_URI = os.environ.get("MONGODB_URI")
-MONGODB_USERNAME = os.environ.get("MONGODB_USERNAME")
-MONGODB_PASSWORD = os.environ.get("MONGODB_PASSWORD")
-AWS_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY")
-AWS_SECRET_KEY = os.environ.get("AWS_SECRET_KEY")
-AWS_KMS_KEY_ID = os.environ.get("AWS_KMS_KEY_ID")
+kms_provider_name = "aws"  # Using AWS KMS instead of "local"
+uri = os.environ.get("MONGODB_URI")
+mongodb_username = os.environ.get("MONGODB_USERNAME")
+mongodb_password = os.environ.get("MONGODB_PASSWORD")
+aws_access_key = os.environ.get("AWS_ACCESS_KEY")
+aws_secret_key = os.environ.get("AWS_SECRET_KEY")
+aws_kms_key_id = os.environ.get("AWS_KMS_KEY_ID")
 
 # Collection names
-KEY_VAULT = "encryption.__keyVault"
-SOURCE_COLLECTION = "smart_home.users"
-ENCRYPTED_COLLECTION = "smart_home.users_encrypted"
+key_vault_database_name = "encryption"
+key_vault_collection_name = "__keyVault"
+key_vault_namespace = f"{key_vault_database_name}.{key_vault_collection_name}"
+
+# For demo purposes, we're using different names than medicalRecords.patients
+encrypted_database_name = "smart_home"
+encrypted_collection_name = "users_encrypted"
+encrypted_namespace = f"{encrypted_database_name}.{encrypted_collection_name}"
+
+# Source collection
+source_database = "smart_home"
+source_collection = "users"
+source_namespace = f"{source_database}.{source_collection}"
 
 def setup_encryption():
     """Set up MongoDB client with encryption configuration"""
     # Connect to MongoDB
-    connection_string = f"mongodb+srv://{MONGODB_USERNAME}:{MONGODB_PASSWORD}@{MONGODB_URI}/?retryWrites=true&w=majority"
+    connection_string = f"mongodb+srv://{mongodb_username}:{mongodb_password}@{uri}/?retryWrites=true&w=majority"
     client = MongoClient(connection_string)
     
     # Create key vault for storing encryption keys
-    key_vault_db, key_vault_coll = KEY_VAULT.split(".")
-    if key_vault_coll not in client[key_vault_db].list_collection_names():
-        client[key_vault_db].create_collection(key_vault_coll)
-        client[key_vault_db][key_vault_coll].create_index(
+    if key_vault_collection_name not in client[key_vault_database_name].list_collection_names():
+        client[key_vault_database_name].create_collection(key_vault_collection_name)
+        client[key_vault_database_name][key_vault_collection_name].create_index(
             [("keyAltNames", 1)],
             unique=True,
             partialFilterExpression={"keyAltNames": {"$exists": True}}
         )
     
-    # Set up AWS KMS configuration
+    # Set up KMS configuration
     kms_providers = {
-        "aws": {
-            "accessKeyId": AWS_ACCESS_KEY,
-            "secretAccessKey": AWS_SECRET_KEY
+        kms_provider_name: {
+            "accessKeyId": aws_access_key,
+            "secretAccessKey": aws_secret_key
         }
     }
     
     # Create encryption client
     client_encryption = ClientEncryption(
         kms_providers,
-        KEY_VAULT,
+        key_vault_namespace,
         client,
         CodecOptions(uuid_representation=STANDARD)
     )
@@ -55,13 +65,15 @@ def setup_encryption():
     # Create or get encryption keys for each field
     keys = {}
     for field in ["city", "region", "zipcode", "birthday", "email"]:
-        key = client[key_vault_db][key_vault_coll].find_one({"keyAltNames": f"demo_{field}_key"})
+        key = client[key_vault_database_name][key_vault_collection_name].find_one(
+            {"keyAltNames": f"demo_{field}_key"}
+        )
         if not key:
             keys[field] = client_encryption.create_data_key(
-                "aws",
+                kms_provider_name,
                 master_key={
                     "region": "us-east-1",
-                    "key": AWS_KMS_KEY_ID,
+                    "key": aws_kms_key_id,
                     "endpoint": "kms.us-east-1.amazonaws.com"
                 },
                 key_alt_names=[f"demo_{field}_key"]
@@ -70,8 +82,8 @@ def setup_encryption():
             keys[field] = key["_id"]
     
     # Define which fields to encrypt and how
-    schema = {
-        ENCRYPTED_COLLECTION: {
+    encrypted_fields_map = {
+        encrypted_namespace: {
             "fields": [
                 {
                     "path": "location.city",
@@ -95,7 +107,7 @@ def setup_encryption():
                     "path": "birthday",
                     "bsonType": "date",
                     "keyId": keys["birthday"],
-                    "queries": [{"queryType": "range"}]
+                    "queries": [{"queryType": "rangePreview"}]
                 },
                 {
                     "path": "email",
@@ -112,8 +124,8 @@ def setup_encryption():
         connection_string,
         auto_encryption_opts=AutoEncryptionOpts(
             kms_providers=kms_providers,
-            key_vault_namespace=KEY_VAULT,
-            encrypted_fields_map=schema
+            key_vault_namespace=key_vault_namespace,
+            encrypted_fields_map=encrypted_fields_map
         )
     )
     
@@ -128,15 +140,12 @@ def migrate_users():
         client, client_encryption = setup_encryption()
         
         # Get source and destination collections
-        source_db, source_coll = SOURCE_COLLECTION.split(".")
-        dest_db, dest_coll = ENCRYPTED_COLLECTION.split(".")
-        
-        source = client[source_db][source_coll]
-        destination = client[dest_db][dest_coll]
+        source = client[source_database][source_collection]
+        destination = client[encrypted_database_name][encrypted_collection_name]
         
         # Clear any existing data
-        client[dest_db].drop_collection(dest_coll)
-        print("Preparing new encrypted collection")
+        client[encrypted_database_name].drop_collection(encrypted_collection_name)
+        print(f"Preparing new encrypted collection: {encrypted_namespace}")
         
         # Get users and convert birthdays to dates
         users = list(source.find({}))
@@ -158,6 +167,11 @@ def migrate_users():
             print(f"Email: {sample.get('email')} (encrypted)")
             print(f"Location: {sample.get('location')} (city, region, zipcode encrypted)")
             print(f"Birthday: {sample.get('birthday')} (encrypted)")
+            
+            # Show that queries still work on encrypted fields
+            print("\nDemonstrating query on encrypted fields:")
+            count = destination.count_documents({"location.region": "West Coast"})
+            print(f"Found {count} users in the West Coast region")
             
     except Exception as e:
         print(f"Error during migration: {e}")
