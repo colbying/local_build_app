@@ -84,6 +84,115 @@ devices = [
     }
 ]
 
+def get_device_state(category, usage, time):
+    """Determine the device state based on category, usage and time"""
+    hour = time.hour
+    
+    if usage < 0.1:
+        return "standby"
+    elif usage < 0.5:
+        return "idle"
+    else:
+        # For TVs during evening hours, they're more likely to be in active state
+        if category == "TV" and 18 <= hour < 22:
+            return random.choices(["active", "idle"], weights=[0.8, 0.2])[0]
+        # For heaters in morning, they're more likely to be active
+        elif category == "HEATER" and 7 <= hour < 9:
+            return random.choices(["active", "idle"], weights=[0.9, 0.1])[0]
+        # For ovens during dinner prep time
+        elif category == "OVEN" and 16 <= hour < 18:
+            return random.choices(["active", "idle"], weights=[0.85, 0.15])[0]
+        # Default probabilities for other cases
+        else:
+            return random.choices(["active", "idle", "standby"], weights=[0.6, 0.3, 0.1])[0]
+
+def get_temperature(category, device_state, time):
+    """Generate a realistic temperature reading based on device category and state"""
+    base_temp = 21.0  # baseline room temperature in Celsius
+    
+    if category == "HEATER":
+        if device_state == "active":
+            return round(random.uniform(40.0, 60.0), 1)  # Operating temperature
+        elif device_state == "idle":
+            return round(random.uniform(30.0, 39.9), 1)  # Warming up or cooling down
+        else:  # standby
+            return round(random.uniform(base_temp - 2, base_temp + 2), 1)  # Room temperature
+    
+    elif category == "OVEN":
+        if device_state == "active":
+            return round(random.uniform(150.0, 250.0), 1)  # High operating temperature
+        elif device_state == "idle":
+            return round(random.uniform(50.0, 100.0), 1)  # Residual heat
+        else:  # standby
+            return round(random.uniform(base_temp, base_temp + 5), 1)  # Slightly above room temp
+    
+    elif category == "TV":
+        if device_state == "active":
+            return round(random.uniform(35.0, 45.0), 1)  # Operating temperature
+        elif device_state == "idle":
+            return round(random.uniform(25.0, 34.9), 1)  # Display on but not fully used
+        else:  # standby
+            return round(random.uniform(base_temp - 1, base_temp + 3), 1)  # Near room temp
+    
+    else:  # MISC_APPLIANCE
+        if device_state == "active":
+            return round(random.uniform(30.0, 40.0), 1)
+        elif device_state == "idle":
+            return round(random.uniform(22.0, 29.9), 1)
+        else:  # standby
+            return round(random.uniform(base_temp - 1, base_temp + 1), 1)
+
+def get_pressure(category, device_state, time):
+    """Generate a realistic pressure reading (hPa) based on device type and state"""
+    # Most home devices don't actually measure pressure, so this is somewhat fictional
+    # Standard atmospheric pressure is around 1013.25 hPa
+    base_pressure = 1013.25
+    
+    # Environmental daily variation (weather effects)
+    day_factor = (time.day % 4) * 2.5  # 0, 2.5, 5, or 7.5 variation by day
+    
+    if category == "HEATER" or category == "OVEN":
+        if device_state == "active":
+            # Heating can slightly increase local pressure
+            return round(base_pressure + day_factor + random.uniform(1.0, 5.0), 1)
+        else:
+            return round(base_pressure + day_factor + random.uniform(-1.0, 1.0), 1)
+    else:
+        # Other devices don't affect pressure significantly
+        return round(base_pressure + day_factor + random.uniform(-2.0, 2.0), 1)
+
+def get_battery_level(category, time, device_id):
+    """Generate a battery level for devices that might have batteries
+    (this is fictional for many home appliances but useful for the data model)"""
+    
+    # For this simulation, we'll pretend some devices have batteries that discharge over time
+    # and get recharged occasionally
+    
+    # Use device_id as a seed for consistent battery patterns
+    seed_value = sum(ord(c) for c in device_id) + time.day
+    random.seed(seed_value)
+    
+    # Generate a base level that decreases throughout the day
+    hour_factor = time.hour / 24.0  # 0.0 to 1.0 throughout the day
+    
+    if category == "TV" or category == "MISC_APPLIANCE":
+        # These might have backup batteries or remote controls with batteries
+        base_level = 100 - (hour_factor * 15)  # Lose ~15% throughout day
+        
+        # Occasionally gets recharged
+        day_of_year = time.timetuple().tm_yday
+        if day_of_year % 3 == 0 and time.hour >= 20:  # Every 3 days, evening recharge
+            base_level = random.uniform(90, 100)
+    else:
+        # These typically don't have batteries, but we'll add a high fixed value for data completeness
+        base_level = random.uniform(95, 100)
+    
+    # Add some random variation
+    battery_level = base_level + random.uniform(-5, 5)
+    
+    # Ensure within bounds
+    return max(0, min(100, round(battery_level, 1)))
+
 def get_current_usage(category, t):
     """
     Return the current usage (kW) for a given category, at minute-level granularity.
@@ -222,6 +331,7 @@ while current_day < end_date:
             # (except MISC_APPLIANCE which might include automated systems)
             if away_from_home and dev["category"] != "MISC_APPLIANCE":
                 usage = random.uniform(0.02, 0.1)  # minimal standby power
+                device_state = "standby"
             else:
                 # Get baseline usage for this device at this time
                 usage = get_current_usage(dev["category"], current_time)
@@ -229,8 +339,16 @@ while current_day < end_date:
                 # Apply cold weather factor to heater
                 if dev["category"] == "HEATER" and is_cold_day:
                     usage *= cold_factor
+                
+                # Determine device state based on usage and time
+                device_state = get_device_state(dev["category"], usage, current_time)
             
-            # Create the reading document
+            # Get additional metrics
+            temperature = get_temperature(dev["category"], device_state, current_time)
+            pressure = get_pressure(dev["category"], device_state, current_time)
+            battery_level = get_battery_level(dev["category"], current_time, dev["deviceId"])
+            
+            # Create the reading document with flattened structure (no Device object)
             reading = {
                 # The timeField for the time series collection must be a datetime
                 "Timestamp": current_time,
@@ -241,14 +359,18 @@ while current_day < end_date:
                     "deviceId": dev["deviceId"]
                 },
 
-                # Device info
-                "Device": {
-                    "Brand": dev["brand"],
-                    "Model": dev["model"],
-                    "Name": dev["name"]
-                },
-                "Category": dev["category"],
-                "current_usage": usage
+                # Device properties at root level
+                "brand": dev["brand"],
+                "model": dev["model"],
+                "device_name": dev["name"],
+                "category": dev["category"],
+                "current_usage": usage,
+                
+                # New metrics
+                "temperature": temperature,
+                "pressure": pressure,
+                "device_state": device_state,
+                "battery_level": battery_level
             }
             all_readings.append(reading)
 

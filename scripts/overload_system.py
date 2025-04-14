@@ -9,10 +9,17 @@ import concurrent.futures
 import threading
 import random
 
-# MongoDB connection settings - modify these as needed
-MONGODB_URL = "mongodb+srv://admin:password!@cluster0.avge5.mongodb.net/?retryWrites=true&w=majority&appName=DemoCluster"
-DATABASE_NAME = "smart_home_data"
-COLLECTION_NAME = "power_readings"
+# MongoDB connection settings from environment variables
+MONGODB_URI = os.environ.get("MONGODB_URI")
+MONGODB_USERNAME = os.environ.get("MONGODB_USERNAME")
+MONGODB_PASSWORD = os.environ.get("MONGODB_PASSWORD")
+
+# Construct the connection string
+MONGODB_URL = f"mongodb+srv://{MONGODB_USERNAME}:{MONGODB_PASSWORD}@{MONGODB_URI}/?retryWrites=true&w=majority"
+
+# Database and collection names
+DATABASE_NAME = "smart_home"
+COLLECTION_NAME = "users"
 
 # Thread-local storage for MongoDB connections
 thread_local = threading.local()
@@ -26,20 +33,109 @@ def get_mongodb_connection():
         thread_local.client = pymongo.MongoClient(MONGODB_URL)
     return thread_local.client, thread_local.client[DATABASE_NAME][COLLECTION_NAME]
 
-def print_query_info(query_name, start_time, results, thread_id):
+def print_full_query(query_params):
+    """Print the full aggregation pipeline"""
+    print("Aggregation Pipeline:")
+    print(json.dumps(query_params['pipeline'], default=str, indent=2))
+
+def print_query_info(query_name, start_time, results, thread_id, query_params):
     """Print information about a query execution"""
     execution_time = time.time() - start_time
     result_count = len(results) if isinstance(results, list) else 1
     
     print(f"\n--- Thread {thread_id} - {query_name} ---")
+    print_full_query(query_params)
     print(f"Execution time: {execution_time:.4f} seconds")
     print(f"Results count: {result_count}")
+
+def generate_unoptimized_query():
+    """Generate a complex, unoptimized query with consistent shape but random parameters"""
+    # Random date range
+    year = random.randint(1960, 2000)
+    month = random.randint(1, 12)
+    day = random.randint(1, 28)
+    start_date = f"{year}-{month:02d}-{day:02d}"
+    
+    # Random energy consumption threshold
+    energy_threshold = random.randint(50, 150)
+    
+    # Random sample size
+    sample_size = random.randint(8000, 15000)
+    
+    # Random limit
+    result_limit = random.randint(500, 1000)
+    
+    pipeline = [
+        # Start with a large sample
+        {"$sample": {"size": sample_size}},
+        
+        # Unwind the devices array
+        {"$unwind": "$devices"},
+        
+        # Complex matching conditions
+        {"$match": {
+            "birthday": {"$gte": start_date},
+            "devices.energyConsumption": {"$gt": energy_threshold},
+            "location.region": {"$in": ["West Coast", "Northeast", "Southeast", "Midwest"]}
+        }},
+        
+        # Group by multiple fields with complex calculations
+        {"$group": {
+            "_id": {
+                "region": "$location.region",
+                "city": "$location.city",
+                "device_type": "$devices.deviceType",
+                "brand": "$devices.brand"
+            },
+            "total_users": {"$addToSet": "$user_id"},
+            "total_consumption": {"$sum": "$devices.energyConsumption"},
+            "devices": {"$push": {
+                "model": "$devices.model",
+                "consumption": "$devices.energyConsumption"
+            }}
+        }},
+        
+        # Project with expensive operations
+        {"$project": {
+            "region": "$_id.region",
+            "city": "$_id.city",
+            "device_type": "$_id.device_type",
+            "brand": "$_id.brand",
+            "unique_user_count": {"$size": "$total_users"},
+            "avg_consumption": {"$divide": ["$total_consumption", {"$size": "$total_users"}]},
+            "device_models": "$devices",
+            "consumption_stats": {
+                "total": "$total_consumption",
+                "per_user": {"$divide": ["$total_consumption", {"$size": "$total_users"}]},
+                "per_device": {"$divide": ["$total_consumption", {"$size": "$devices"}]}
+            }
+        }},
+        
+        # Sort by multiple fields
+        {"$sort": {
+            "unique_user_count": -1,
+            "avg_consumption": -1
+        }},
+        
+        # Large limit to ensure significant data transfer
+        {"$limit": result_limit}
+    ]
+
+    return {
+        "type": "complex_analysis",
+        "pipeline": pipeline,
+        "parameters": {
+            "start_date": start_date,
+            "energy_threshold": energy_threshold,
+            "sample_size": sample_size,
+            "result_limit": result_limit
+        }
+    }
 
 def run_continuous_queries(thread_id, duration_seconds):
     """Run queries continuously for the specified duration"""
     global STOP_THREADS
     
-    # Get thread-local MongoDB connection
     _, collection = get_mongodb_connection()
     
     print(f"Thread {thread_id} starting continuous queries")
@@ -48,69 +144,34 @@ def run_continuous_queries(thread_id, duration_seconds):
     thread_start_time = time.time()
     
     try:
-        # Run queries until told to stop
         while not STOP_THREADS:
-            # Generate random parameters
-            year = 2024
-            month = random.randint(1, 6)
-            day = random.randint(1, 25)
+            query_params = generate_unoptimized_query()
             
-            # Generate random date range
-            range_type = random.choice(["short", "medium", "long"])
-            if range_type == "short":
-                start_date = datetime.datetime(year, month, day)
-                end_date = start_date + datetime.timedelta(days=random.randint(1, 3))
-            elif range_type == "medium":
-                start_date = datetime.datetime(year, month, day)
-                end_date = start_date + datetime.timedelta(days=random.randint(4, 10))
-            else:
-                start_date = datetime.datetime(year, month, day)
-                end_date = start_date + datetime.timedelta(days=random.randint(11, 30))
-            
-            # Vary the parameters
-            sample_size = random.choice([1000, 2000, 5000])
-            limit_size = random.choice([20, 50, 100])
-            
-            # Execute the standard query with error handling for individual queries
             start_time = time.time()
             try:
-                results = list(collection.aggregate([
-                    {"$match": {
-                        "timestamp": {"$gte": start_date, "$lte": end_date}
-                    }},
-                    {"$sample": {"size": sample_size}},
-                    {"$group": {
-                        "_id": "$device_id.Device",
-                        "avgPower": {"$avg": "$current_power"},
-                        "maxPower": {"$max": "$current_power"},
-                        "minPower": {"$min": "$current_power"},
-                        "count": {"$sum": 1}
-                    }},
-                    {"$match": {
-                        "count": {"$gt": random.randint(2, 5)}
-                    }},
-                    {"$sort": {"avgPower": -1}},
-                    {"$limit": limit_size}
-                ]))
+                results = list(collection.aggregate(
+                    query_params['pipeline'],
+                    allowDiskUse=True  # Allow queries to use disk for large operations
+                ))
                 
                 query_count += 1
-                # Report success for every query
-                print_query_info(f"Query {query_count}", start_time, results, thread_id)
+                print_query_info(f"Query {query_count} ({query_params['type']})", 
+                               start_time, results, thread_id, query_params)
                 
-                # Also report elapsed time with each query
                 elapsed = time.time() - thread_start_time
-                print(f"Thread {thread_id} has been running for {elapsed:.1f} seconds, completed {query_count} queries, {error_count} errors")
+                print(f"Thread {thread_id} has been running for {elapsed:.1f} seconds, "
+                      f"completed {query_count} queries, {error_count} errors")
                 
             except Exception as query_error:
                 error_count += 1
                 execution_time = time.time() - start_time
                 print(f"\n--- Thread {thread_id} - QUERY ERROR ---")
+                print("Failed Query:")
+                print_full_query(query_params)
                 print(f"Time spent before error: {execution_time:.4f} seconds")
                 print(f"Error details: {str(query_error)[:200]}")
-                print(f"Parameters: {range_type} range, {sample_size} samples, {limit_size} limit")
                 print(f"Thread {thread_id} has encountered {error_count} errors so far")
                 
-                # Try to reconnect if connection-related error
                 if "connection" in str(query_error).lower() or "network" in str(query_error).lower():
                     try:
                         print(f"Thread {thread_id} attempting to reconnect...")
@@ -120,17 +181,14 @@ def run_continuous_queries(thread_id, duration_seconds):
                     except Exception as reconnect_error:
                         print(f"Thread {thread_id} reconnection failed: {str(reconnect_error)[:100]}")
             
-            # No deliberate sleep or pause - go straight to the next query
-            
     except Exception as thread_error:
         print(f"Thread {thread_id} encountered a fatal error: {str(thread_error)[:150]}...")
     finally:
         try:
-            # Get the total run time for this thread
             thread_duration = time.time() - thread_start_time
-            print(f"Thread {thread_id} ending after {thread_duration:.2f} seconds, completed {query_count} queries, encountered {error_count} errors")
+            print(f"Thread {thread_id} ending after {thread_duration:.2f} seconds, "
+                  f"completed {query_count} queries, encountered {error_count} errors")
             
-            # Close this thread's connection
             if hasattr(thread_local, "client"):
                 thread_local.client.close()
         except:

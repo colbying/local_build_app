@@ -48,7 +48,7 @@ def setup_encryption():
     
     # Set up KMS configuration
     kms_providers = {
-        kms_provider_name: {
+        "aws": {
             "accessKeyId": aws_access_key,
             "secretAccessKey": aws_secret_key
         }

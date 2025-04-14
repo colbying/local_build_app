@@ -16,7 +16,7 @@ sh.shardCollection(
       timeseries: { 
         timeField: "Timestamp", 
         metaField: "metadata", 
-        granularity: "minutes" 
+        granularity: "seconds" 
       } 
     }
   )

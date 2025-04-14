@@ -1,0 +1,21 @@
+{
+    "Timestamp": {
+      "$date": "2025-04-05T00:03:00.000Z"
+    },
+    "metadata": {
+      "UserId": "user123",
+      "deviceId": "HEAT001"
+    },
+    "_id": {
+      "$oid": "67f6974d584bf04efedb4366"
+    },
+    "pressure": 1016.7,
+    "device_state": "standby",
+    "model": "HeatMax1000",
+    "temperature": 19.6,
+    "current_usage": 0.0870838490924282,
+    "category": "HEATER",
+    "brand": "AcmeHeating",
+    "battery_level": 91.4,
+    "device_name": "LivingRoomHeater"
+  }
