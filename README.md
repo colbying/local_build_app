@@ -7,6 +7,7 @@ This repository contains a Flask application for managing and visualizing smart 
 - Python 3.6+
 - MongoDB Atlas account
 - Git
+- AWS account (for Queryable Encryption)
 
 ## Installation
 
@@ -22,75 +23,85 @@ This repository contains a Flask application for managing and visualizing smart 
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
 
-3. Run the setup script:
-   ```bash
-   python setup.py
-   ```
-   This will:
-   - Install all required Python packages
-   - Create a `.secrets` file with your MongoDB credentials
-   - Export the credentials to your environment
+## Setup Scripts
 
-4. Configure MongoDB Atlas:
-   - Log in to your MongoDB Atlas account
-   - Create a new cluster if you don't have one
-   - Add your IP address to the IP whitelist
-   - Create a database user with read/write permissions
-   - Get your connection string from the "Connect" button
+### 1. Initial Setup (setup.py)
 
-5. Run the application:
+The `setup.py` script handles the initial application setup:
+
+```bash
+python setup.py
+```
+
+This script will:
+- Install all required Python packages
+- Create a `.secrets` file with your MongoDB credentials
+- Export the credentials to your environment
+
+If you need to update your MongoDB credentials:
+1. Delete the existing `.secrets` file
+2. Run `setup.py` again
+3. Enter your new credentials when prompted
+
+### 2. Queryable Encryption Setup (setup_queryable_encryption.py)
+
+The `setup_queryable_encryption.py` script configures AWS credentials for Queryable Encryption:
+
+```bash
+python setup_queryable_encryption.py
+```
+
+This script will:
+- Check for existing AWS credentials in `.secrets`
+- If credentials exist, it will:
+  - Display the existing credentials
+  - Export them to the environment
+  - Exit without prompting
+- If credentials don't exist, it will:
+  - Prompt for AWS credentials
+  - Save them to `.secrets`
+  - Export them to the environment
+
+Required AWS credentials:
+- AWS Access Key
+- AWS Secret Key
+- AWS KMS Key ID
+- AWS KMS ARN
+
+To update AWS credentials:
+1. Delete the `.secrets` file
+2. Run `setup.py` to set up MongoDB credentials
+3. Run `setup_queryable_encryption.py` to set up AWS credentials
+
+## Running the Application
+
+After setting up both MongoDB and AWS credentials:
+
+1. Start the application:
    ```bash
    ./run_app.sh
    ```
    The application will start on http://localhost:5000
 
+2. Access the application:
+   - Main dashboard: http://localhost:5000
+   - Queryable Encryption demo: http://localhost:5000/qe_demo
+
 ## Environment Setup
 
 The application uses environment variables for configuration. These are managed through the `.secrets` file:
 
-```bash
-MONGODB_URI=your_cluster.mongodb.net
-MONGODB_USERNAME=your_username
-MONGODB_PASSWORD=your_password
+```json
+{
+  "MONGODB_URI": "your_cluster.mongodb.net",
+  "MONGODB_USERNAME": "your_username",
+  "MONGODB_PASSWORD": "your_password",
+  "AWS_ACCESS_KEY": "your_aws_access_key",
+  "AWS_SECRET_KEY": "your_aws_secret_key",
+  "AWS_KMS_KEY_ID": "your_kms_key_id",
+  "AWS_KMS_ARN": "your_kms_arn"
+}
 ```
-
-To update your credentials:
-1. Delete the existing `.secrets` file
-2. Run `python setup.py` again
-3. Enter your new credentials when prompted
-
-## Queryable Encryption Setup
-
-To enable Queryable Encryption in your application:
-
-1. Install the required dependencies:
-   ```bash
-   pip install pymongo[encryption]
-   ```
-
-2. Install libmongocrypt:
-   ```bash
-   # For macOS
-   brew install libmongocrypt
-   
-   # For Linux
-   sudo apt-get install libmongocrypt
-   ```
-
-3. Create a Customer Master Key (CMK):
-   - Follow the [MongoDB documentation](https://www.mongodb.com/docs/manual/core/queryable-encryption/overview-enable-qe/) to set up your CMK
-   - Store your CMK credentials securely
-
-4. Configure your application:
-   - Update the encryption schema in `qe_utils.py`
-   - Set up your encryption client using the provided helper functions
-   - Ensure your MongoDB Atlas cluster supports Queryable Encryption
-
-5. Test the encryption:
-   - Use the `/qe_demo` endpoint to test encrypted queries
-   - Verify that sensitive data is properly encrypted
-
-For detailed instructions, refer to the [MongoDB Queryable Encryption documentation](https://www.mongodb.com/docs/manual/core/queryable-encryption/overview-enable-qe/).
 
 ## Application Features
 
@@ -127,20 +138,26 @@ If you encounter connection issues:
    env | grep MONGODB
    ```
 
-2. Check MongoDB Atlas:
+2. Verify your AWS credentials:
+   ```bash
+   env | grep AWS
+   ```
+
+3. Check MongoDB Atlas:
    - Ensure your IP is whitelisted
    - Verify your database user has correct permissions
    - Confirm your cluster is running
 
-3. Check the application logs:
+4. Check the application logs:
    ```bash
    ./run_app.sh
    ```
 
-4. Common errors:
+5. Common errors:
    - "Connection refused": Check your MongoDB URI and credentials
    - "Invalid URI host": Verify your MongoDB URI format
    - "Authentication failed": Check your username and password
+   - "KMS error": Verify your AWS credentials and KMS permissions
 
 ## Security Notes
 

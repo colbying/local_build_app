@@ -1,5 +1,5 @@
 # Environment and secrets files
-.env
+.secrets
 
 # Python
 __pycache__/
